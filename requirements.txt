@@ -1,0 +1,54 @@
+# Core Framework
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+
+# Google Drive API (for document ingestion only)
+google-api-python-client
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+
+# LangChain Core
+langchain
+langchain-community
+
+# Database
+psycopg[binary]
+psycopg2-binary
+pgvector
+sqlalchemy
+alembic
+
+# PDF Processing
+pypdf
+pymupdf
+
+# Text Processing
+tiktoken
+
+# Background Jobs
+celery
+redis
+
+# Evaluation
+ragas
+datasets
+
+# Open Source ML Models
+sentence-transformers
+torch
+
+# Utilities
+python-dotenv
+pyyaml
+requests
+tenacity
+rich
+
+# Development
+pytest
+pytest-asyncio
+httpx
+black

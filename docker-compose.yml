@@ -1,0 +1,110 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: rag_postgres
+    environment:
+      POSTGRES_USER: rag_user
+      POSTGRES_PASSWORD: rag_password
+      POSTGRES_DB: rag_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag_user -d rag_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: rag_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      args:
+        ENABLE_CUDA: "true"  # Enable CUDA support
+    container_name: rag_api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DB_URL=postgresql+psycopg://rag_user:rag_password@postgres:5432/rag_db
+      - REDIS_URL=redis://redis:6379/0
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - PYTHONUNBUFFERED=1  # Show Python output immediately in logs
+      - GCP_REGION=europe-north1
+      - GOOGLE_APPLICATION_CREDENTIALS=/secrets/sa.json
+      - HF_HOME=/root/.cache/huggingface  # HuggingFace cache directory
+      - SENTENCE_TRANSFORMERS_HOME=/root/.cache/huggingface/sentence-transformers  # Sentence transformers cache
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./secrets:/secrets:ro
+      - ./app:/app/app
+      - model_cache:/root/.cache  # Cache all models (huggingface, torch, etc)
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu, compute, utility]
+
+  # celery_worker:
+  #   build:
+  #     context: .
+  #     args:
+  #       ENABLE_CUDA: "true"  # Enable CUDA support
+  #   container_name: rag_celery_worker
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   environment:
+      # - DB_URL=postgresql+psycopg://rag_user:rag_password@postgres:5432/rag_db
+      # - REDIS_URL=redis://redis:6379/0
+      # - NVIDIA_VISIBLE_DEVICES=all
+      # - NVIDIA_DRIVER_CAPABILITIES=all
+      # - PYTHONUNBUFFERED=1  # Show Python output immediately in logs
+      # - GCP_REGION=europe-north1
+      # - GOOGLE_APPLICATION_CREDENTIALS=/secrets/sa.json
+      # - HF_HOME=/root/.cache/huggingface  # HuggingFace cache directory
+      # - SENTENCE_TRANSFORMERS_HOME=/root/.cache/huggingface/sentence-transformers  # Sentence transformers cache
+  #   env_file:
+  #     - .env
+  #   volumes:
+  #     - ./secrets:/secrets:ro
+  #     - ./app:/app/app
+  #     - model_cache:/root/.cache  # Cache all models (huggingface, torch, etc)
+  #   command: celery -A app.tasks.celery_app worker --loglevel=info
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             capabilities: [gpu, compute, utility]
+
+volumes:
+  postgres_data:
+  redis_data:
+  model_cache:  # Persistent storage for downloaded ML models
