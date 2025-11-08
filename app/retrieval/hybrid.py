@@ -111,16 +111,18 @@ class HybridRetriever:
             with psycopg.connect(self.db_url) as conn:
                 with conn.cursor() as cur:
                     # Full-text search with ranking
+                    # Use plainto_tsquery with 'simple' dictionary to be language-agnostic
+                    # (avoids relying on english stemmer which can miss non-English texts)
                     cur.execute("""
                         SELECT 
                             fts.chunk_id,
                             ts_rank(fts.tsv, query) AS bm25_score
                         FROM documents_fts fts,
-                             to_tsquery('english', %s) query
+                             plainto_tsquery('simple', %s) query
                         WHERE fts.tsv @@ query
                         ORDER BY bm25_score DESC
                         LIMIT %s
-                    """, (self._prepare_query_for_tsquery(query), top_k))
+                    """, (query, top_k))
                     
                     results = []
                     for row in cur.fetchall():
@@ -246,3 +248,65 @@ class HybridRetriever:
         except Exception as e:
             logger.error(f"Error fetching chunk details: {e}")
             return []
+
+    def document_search(self, query: str, max_chunks: int = 1000, top_docs: int = 0) -> List[Dict]:
+        """
+        Perform a broader document-level search.
+
+        This method retrieves a larger set of matching chunks (up to max_chunks),
+        groups results by document, and returns documents sorted by the best
+        matching chunk score. If top_docs is 0, all matching documents are returned.
+
+        Args:
+            query: Search query
+            max_chunks: Maximum number of chunks to retrieve for scoring
+            top_docs: Limit number of documents to return (0 = no limit)
+
+        Returns:
+            List of documents with aggregated scores and metadata
+        """
+        # Get many candidate chunks from both vector and bm25
+        try:
+            query_embedding = self.embedding_service.embed_texts([query])[0]
+        except Exception:
+            query_embedding = None
+
+        vector_results = []
+        if query_embedding is not None:
+            vector_results = self._vector_search(query_embedding, max_chunks)
+
+        bm25_results = self._bm25_search(query, max_chunks)
+
+        # Combine results but do not truncate by top_k; just fuse all candidates
+        combined = self._reciprocal_rank_fusion(vector_results, bm25_results, top_k=max_chunks)
+
+        # Fetch details for chunks
+        chunk_details = self._fetch_chunk_details(combined)
+
+        # Aggregate by document
+        docs = {}
+        for c in chunk_details:
+            doc_id = c.get('document_id')
+            if not doc_id:
+                continue
+            score = c.get('score', 0)
+            if doc_id not in docs:
+                docs[doc_id] = {
+                    'document_id': doc_id,
+                    'file_name': c.get('file_name'),
+                    'drive_link': c.get('drive_link'),
+                    'best_score': score,
+                    'matched_chunks': [c]
+                }
+            else:
+                docs[doc_id]['matched_chunks'].append(c)
+                if score > docs[doc_id]['best_score']:
+                    docs[doc_id]['best_score'] = score
+
+        # Sort documents by best_score desc
+        sorted_docs = sorted(docs.values(), key=lambda x: x['best_score'], reverse=True)
+
+        if top_docs and top_docs > 0:
+            sorted_docs = sorted_docs[:top_docs]
+
+        return sorted_docs

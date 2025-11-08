@@ -1,22 +1,29 @@
-"""Embedding generation and pgvector indexing."""
+"""Embedding generation and pgvector indexing using LangChain."""
 import logging
 from typing import List, Dict
 import psycopg
-from sentence_transformers import SentenceTransformer
+from langchain_huggingface import HuggingFaceEmbeddings
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 class EmbeddingService:
-    """Service for generating embeddings using local sentence-transformers."""
+    """Service for generating embeddings using LangChain's HuggingFaceEmbeddings."""
     
     def __init__(self):
         self.model = settings.embedding_model
         logger.info(f"Loading embedding model: {self.model}")
-        self.model_instance = SentenceTransformer(self.model)
-        # Get actual dimension from model
-        self.dimension = self.model_instance.get_sentence_embedding_dimension()
+        
+        # Initialize LangChain HuggingFaceEmbeddings
+        self.model_instance = HuggingFaceEmbeddings(
+            model_name=self.model,
+            model_kwargs={'device': 'cpu'},  # Will auto-detect GPU
+            encode_kwargs={'normalize_embeddings': False, 'batch_size': 32}
+        )
+        
+        # Get dimension from config (LangChain doesn't expose it directly)
+        self.dimension = settings.embedding_dimension
         logger.info(f"Embedding dimension: {self.dimension}")
     
     def embed_texts(self, texts: List[str]) -> List[List[float]]:
@@ -30,13 +37,9 @@ class EmbeddingService:
             List of embedding vectors
         """
         try:
-            embeddings = self.model_instance.encode(
-                texts,
-                convert_to_numpy=True,
-                show_progress_bar=False,
-                batch_size=32
-            )
-            return embeddings.tolist()
+            # Use LangChain's embed_documents method
+            embeddings = self.model_instance.embed_documents(texts)
+            return embeddings
         except Exception as e:
             logger.error(f"Error generating embeddings: {e}")
             raise

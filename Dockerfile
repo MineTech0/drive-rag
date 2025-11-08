@@ -14,7 +14,8 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
 
-# Install sentence-transformers with CUDA support if enabled
+# Install Python packages without --no-cache-dir to preserve pip cache
+# This allows the pip_cache volume to persist downloaded wheels
 RUN if [ "$ENABLE_CUDA" = "true" ]; then \
         pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130 && \
         pip install -r requirements.txt; \

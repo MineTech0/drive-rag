@@ -11,6 +11,7 @@ from app.retrieval.hybrid import HybridRetriever
 from app.rerank.bge import BGEReranker
 from app.generate.llm import LLMService
 from app.tasks import ingest_folder_task
+from app.agents.iterative_rag import IterativeRAGAgent
 
 # Configure logging
 logging.basicConfig(level=settings.log_level)
@@ -71,14 +72,26 @@ def calculate_dynamic_top_k(query: str) -> int:
     - Query length (longer = more context needed)
     - Question words (multiple questions = more sources)
     - Comparative/list keywords (needs more examples)
+    - Search/find keywords (exhaustive search needed)
     
     Returns:
-        int: Recommended top_k value (4-16)
+        int: Recommended top_k value (4-20)
     """
     query_lower = query.lower()
     
     # Base top_k
     top_k = 6
+    
+    # CRITICAL: Check for exhaustive search keywords first
+    exhaustive_keywords = [
+        'etsi', 'hae', 'löydä', 'kaikki', 'kaikkia',
+        'search', 'find', 'all', 'every', 'each',
+        'listaa', 'luettele', 'kerro kaikki',
+        'mitkä kaikki', 'mitä kaikkea'
+    ]
+    if any(keyword in query_lower for keyword in exhaustive_keywords):
+        top_k = 20  # Maximum sources for exhaustive search
+        logger.info(f"Exhaustive search detected - using top_k={top_k}")
     
     # Factor 1: Query length
     words = query.split()
@@ -87,7 +100,7 @@ def calculate_dynamic_top_k(query: str) -> int:
     elif len(words) > 10:
         top_k += 2
     elif len(words) < 5:
-        top_k -= 1
+        top_k = max(top_k - 1, 4)
     
     # Factor 2: Multiple questions
     question_markers = ['?', 'ja', 'sekä', 'myös', 'lisäksi', 'and', 'also']
@@ -100,8 +113,7 @@ def calculate_dynamic_top_k(query: str) -> int:
     # Factor 3: Comparative/list queries (need more examples)
     comparative_keywords = [
         'vertaa', 'vertaile', 'ero', 'erot', 'eroa',
-        'luettele', 'listaa', 'kaikki', 'mitä kaikkea',
-        'compare', 'difference', 'list', 'all',
+        'compare', 'difference', 
         'yhteenveto', 'summary', 'kokonaiskuva', 'overview'
     ]
     if any(keyword in query_lower for keyword in comparative_keywords):
@@ -114,10 +126,10 @@ def calculate_dynamic_top_k(query: str) -> int:
         'määrittele', 'define'
     ]
     if any(keyword in query_lower for keyword in specific_keywords):
-        top_k -= 2
+        top_k = max(top_k - 2, 4)
     
-    # Clamp between 4 and 16
-    return max(4, min(16, top_k))
+    # Clamp between 4 and 20
+    return max(4, min(20, top_k))
 
 
 @app.on_event("startup")
@@ -198,6 +210,11 @@ class AskResponse(BaseModel):
 class SearchRequest(BaseModel):
     query: str
     k: int = 20
+    # If true, perform document-level/broad search (aggregate chunks into documents)
+    document_level: bool = False
+    # When document_level=True, control how many chunks to consider and how many documents to return
+    max_chunks: int = 1000
+    top_docs: int = 0
 
 
 class HealthResponse(BaseModel):
@@ -286,6 +303,21 @@ async def ask_question(request: AskRequest):
         else:
             top_k = request.top_k
         
+        # Detect if exhaustive search is needed
+        query_lower = request.query.lower()
+        exhaustive_keywords = [
+            'etsi', 'hae', 'löydä', 'kaikki', 'kaikkia',
+            'search', 'find', 'all', 'every', 'each',
+            'listaa', 'luettele', 'kerro kaikki',
+            'mitkä kaikki', 'mitä kaikkea'
+        ]
+        is_exhaustive = any(keyword in query_lower for keyword in exhaustive_keywords)
+        
+        # Increase candidate retrieval for exhaustive searches
+        num_candidates = 100 if is_exhaustive else settings.topk_candidates
+        if is_exhaustive:
+            logger.info(f"Exhaustive search mode: retrieving {num_candidates} candidates")
+        
         # Handle multi-query expansion
         if request.multi_query and settings.enable_multi_query:
             queries = llm_service.generate_multi_queries(request.query)
@@ -301,7 +333,7 @@ async def ask_question(request: AskRequest):
         # Retrieve candidates from all queries
         all_candidates = []
         for query in queries:
-            candidates = retriever.search(query, settings.topk_candidates)
+            candidates = retriever.search(query, num_candidates)
             all_candidates.extend(candidates)
         
         # Deduplicate by chunk_id
@@ -311,6 +343,8 @@ async def ask_question(request: AskRequest):
             if cand['chunk_id'] not in seen:
                 seen.add(cand['chunk_id'])
                 unique_candidates.append(cand)
+        
+        logger.info(f"Retrieved {len(unique_candidates)} unique candidates for reranking")
         
         # Rerank candidates
         if unique_candidates:
@@ -342,6 +376,62 @@ async def ask_question(request: AskRequest):
         
     except Exception as e:
         logger.error(f"Error in ask endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ask-iterative")
+async def ask_iterative(request: AskRequest):
+    """
+    Iterative Agentic RAG - searches until satisfied with result quality.
+    
+    The agent:
+    1. Performs initial comprehensive search
+    2. Assesses if information is complete
+    3. Identifies gaps and generates refined queries
+    4. Continues iterating until confident or max iterations (default 5)
+    5. Returns comprehensive answer with ALL relevant sources
+    
+    Best for: "etsi kaikki", "hae kattavasti", "kerro kaikki mitä tiedät"
+    """
+    start_time = time.time()
+    
+    try:
+        # Get services
+        llm_service = get_llm_service()
+        retriever = get_retriever()
+        reranker = get_reranker()
+        
+        # Initialize iterative agent
+        agent = IterativeRAGAgent(
+            retriever=retriever,
+            reranker=reranker,
+            llm_service=llm_service,
+            max_iterations=5,  # Can be made configurable
+            confidence_threshold=0.85,
+            max_sources=100
+        )
+        
+        # Run iterative search
+        logger.info(f"Starting iterative RAG for: {request.query}")
+        result = agent.search_iteratively(
+            original_query=request.query,
+            initial_candidates=100  # Start with comprehensive search
+        )
+        
+        latency_ms = int((time.time() - start_time) * 1000)
+        
+        return {
+            "answer": result['answer'],
+            "sources": result['sources'],
+            "latency_ms": latency_ms,
+            "iterations": result['iterations'],
+            "total_sources": result['total_sources'],
+            "total_iterations": result['total_iterations'],
+            "final_confidence": result['final_confidence']
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in iterative ask endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -549,6 +639,15 @@ async def search_documents(request: SearchRequest):
     """
     try:
         retriever = get_retriever()
+        # If caller wants a document-level broad search, use the document_search helper
+        if getattr(request, 'document_level', False):
+            docs = retriever.document_search(
+                request.query,
+                max_chunks=request.max_chunks,
+                top_docs=request.top_docs
+            )
+            return {"documents": docs}
+
         results = retriever.search(request.query, request.k)
         return {"results": results}
         
@@ -628,6 +727,8 @@ async def root():
             "/ingest/start",
             "/ingest/status/{job_id}",
             "/ask",
+            "/ask-iterative - Agentic RAG with iterative search",
+            "/research - Deep research with sub-questions",
             "/search",
             "/healthz"
         ]

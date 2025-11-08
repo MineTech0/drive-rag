@@ -7,13 +7,19 @@ Complete setup instructions for the Drive RAG system using entirely open source 
 - Python 3.11+
 - Docker & Docker Compose
 - Google Drive API credentials (Service Account) - only for document ingestion
-- Ollama (for local LLM) - completely free and open source
+- LLM provider (choose one):
+  - **Ollama** (default) - Free, open-source CLI tool
+  - **LM Studio** - User-friendly GUI for local models
+  - **Gemini** - Google's cloud API (fast and affordable)
+  - Any OpenAI-compatible API
 
-**No API keys or paid services required!**
+**No paid API services required!**
 
 ## Installation
 
-### 1. Install Ollama
+### 1. Install LLM Provider
+
+#### Option A: Ollama (CLI - Default)
 
 Download and install Ollama from [https://ollama.com](https://ollama.com)
 
@@ -27,6 +33,27 @@ ollama pull phi3         # Lightweight: 3.8B params
 ollama list
 ```
 
+#### Option B: LM Studio (GUI - Beginner Friendly)
+
+1. Download LM Studio from [https://lmstudio.ai](https://lmstudio.ai)
+2. Install and launch LM Studio
+3. Download a model from the Search tab (e.g., Mistral 7B, Llama 3.1)
+4. Go to the "Local Server" tab
+5. Click "Start Server" (default: http://localhost:1234)
+6. Note the model name shown in LM Studio
+
+#### Option C: Google Gemini (Cloud API)
+
+1. Go to [Google AI Studio](https://aistudio.google.com/app/apikey)
+2. Sign in with your Google account
+3. Click "Create API Key"
+4. Copy the API key
+5. No installation needed - works immediately
+
+**Pros**: Fast, affordable, no local compute needed  
+**Cons**: Requires internet, costs money (but very cheap with free tier)  
+**Best for**: Quick testing, production deployments without local GPU
+
 ### 2. Clone and Configure
 
 ```bash
@@ -35,6 +62,8 @@ cp .env.example .env
 ```
 
 Edit `.env` with your configuration:
+
+**For Ollama (default):**
 ```env
 # Google Drive API (for document ingestion only)
 GOOGLE_APPLICATION_CREDENTIALS=/secrets/sa.json
@@ -46,12 +75,65 @@ DB_URL=postgresql+psycopg://rag_user:rag_password@localhost:5432/rag_db
 # Embedding Model (local, no API key needed)
 EMBEDDING_MODEL=intfloat/multilingual-e5-large
 
-# LLM (local Ollama)
+# LLM Provider - Ollama
+LLM_PROVIDER=ollama
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=mistral
 
 # Reranker (local, no API key needed)
 RERANKER_MODEL=BAAI/bge-reranker-v2-m3
+```
+
+**For LM Studio:**
+```env
+# Google Drive API (for document ingestion only)
+GOOGLE_APPLICATION_CREDENTIALS=/secrets/sa.json
+ROOT_FOLDER_ID=your_drive_folder_id
+
+# Database
+DB_URL=postgresql+psycopg://rag_user:rag_password@localhost:5432/rag_db
+
+# Embedding Model (local, no API key needed)
+EMBEDDING_MODEL=intfloat/multilingual-e5-large
+
+# LLM Provider - LM Studio
+LLM_PROVIDER=openai
+OPENAI_API_BASE=http://localhost:1234/v1
+OPENAI_API_KEY=lm-studio
+OPENAI_MODEL=local-model  # Use the model name shown in LM Studio
+
+# Reranker (local, no API key needed)
+RERANKER_MODEL=BAAI/bge-reranker-v2-m3
+```
+
+**For Google Gemini:**
+```env
+# Google Drive API (for document ingestion only)
+GOOGLE_APPLICATION_CREDENTIALS=/secrets/sa.json
+ROOT_FOLDER_ID=your_drive_folder_id
+
+# Database
+DB_URL=postgresql+psycopg://rag_user:rag_password@localhost:5432/rag_db
+
+# Embedding Model (local, no API key needed)
+EMBEDDING_MODEL=intfloat/multilingual-e5-large
+
+# LLM Provider - Gemini
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=your-api-key-from-ai-studio
+GEMINI_MODEL=gemini-1.5-flash  # or gemini-1.5-pro for best quality
+
+# Reranker (local, no API key needed)
+RERANKER_MODEL=BAAI/bge-reranker-v2-m3
+```
+
+**For other OpenAI-compatible APIs:**
+```env
+# LLM Provider - OpenAI-compatible
+LLM_PROVIDER=openai
+OPENAI_API_BASE=https://api.your-provider.com/v1
+OPENAI_API_KEY=your-api-key
+OPENAI_MODEL=your-model-name
 ```
 
 ### 3. Google Drive Service Account Setup
@@ -227,13 +309,18 @@ Key settings in `.env`:
 
 ### Models (All Open Source)
 - `EMBEDDING_MODEL=intfloat/multilingual-e5-large` - Local embedding model (1024 dim)
-- `OLLAMA_MODEL=mistral` - Local LLM via Ollama
 - `RERANKER_MODEL=BAAI/bge-reranker-v2-m3` - Local cross-encoder reranker
 
-All models run locally with no API calls. First run will download models automatically:
+### LLM Configuration
+- `LLM_PROVIDER=ollama` or `openai` - Choose your LLM provider
+- **For Ollama**: `OLLAMA_MODEL=mistral`, `OLLAMA_BASE_URL=http://localhost:11434`
+- **For LM Studio**: `OPENAI_API_BASE=http://localhost:1234/v1`, `OPENAI_MODEL=local-model`
+- **For OpenAI/other**: `OPENAI_API_BASE=...`, `OPENAI_API_KEY=...`, `OPENAI_MODEL=...`
+
+All models run locally with no API calls (except if using cloud OpenAI). First run will download models automatically:
 - multilingual-e5-large: ~2.5GB
 - bge-reranker-v2-m3: ~560MB
-- mistral (via Ollama): ~4GB
+- LLM models (via Ollama/LM Studio): 3-8GB depending on model
 
 ## GPU Acceleration (Recommended)
 

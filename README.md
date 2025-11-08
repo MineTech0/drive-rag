@@ -29,15 +29,24 @@ The system implements a retrieval-augmented generation pipeline:
 ## Documentation
 
 - **[SETUP.md](./SETUP.md)** - Installation and configuration guide
+- **[LM_STUDIO.md](./LM_STUDIO.md)** - LM Studio setup guide (beginner-friendly GUI for local LLMs)
+- **[GEMINI.md](./GEMINI.md)** - Google Gemini API setup guide
+- **[ITERATIVE_RAG.md](./ITERATIVE_RAG.md)** - Agentic RAG with iterative search
 - **[ARCHITECTURE.md](./ARCHITECTURE.md)** - Design decisions and rationale
 
 ## Technology Stack
 
 **Backend**: FastAPI with async request handling, PostgreSQL with pgvector for vector operations, Celery and Redis for background job processing
 
-**RAG Components**: LangChain for document processing, sentence-transformers for local embeddings (multilingual-e5-large), hybrid search combining vector similarity with BM25 full-text search, BGE cross-encoder for reranking, Ollama with open source LLMs (Mistral/Llama) for answer generation
+**RAG Components**: LangChain framework with HuggingFace embeddings (multilingual-e5-large) for local embedding generation, hybrid search combining vector similarity with BM25 full-text search, BGE cross-encoder for reranking, flexible LLM support (Ollama, OpenAI-compatible APIs like LM Studio, or Gemini) for answer generation via LangChain providers
 
 **Fully Open Source**: No API keys required - runs entirely on local infrastructure with open source models
+
+**LLM Options**: 
+- **Ollama** (default): Free, open-source local models (Mistral, Llama, etc.)
+- **LM Studio**: OpenAI-compatible API for running local models with a GUI
+- **Gemini**: Google's Gemini API (requires API key from AI Studio)
+- **Other OpenAI-compatible APIs**: Any service that implements the OpenAI API standard
 
 **Evaluation**: Ragas framework for quality metrics (faithfulness, recall, precision, relevance)
 
@@ -88,9 +97,12 @@ curl -X POST http://localhost:8000/search \
 
 - Docker and Docker Compose
 - Google Drive Service Account credentials (for document ingestion only)
-- Ollama installed locally (for LLM - completely free and open source)
+- LLM provider (choose one):
+  - **Ollama** (default): Free, open-source, install from https://ollama.ai
+  - **LM Studio**: User-friendly GUI for local models, download from https://lmstudio.ai
+  - Any OpenAI-compatible API endpoint
 
-No API keys or paid services required. For detailed setup instructions, see [SETUP.md](./SETUP.md).
+No paid API services required. For detailed setup instructions, see [SETUP.md](./SETUP.md).
 
 ## Project Structure
 

@@ -49,10 +49,11 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
       - PYTHONUNBUFFERED=1  # Show Python output immediately in logs
-      - GCP_REGION=europe-north1
       - GOOGLE_APPLICATION_CREDENTIALS=/secrets/sa.json
       - HF_HOME=/root/.cache/huggingface  # HuggingFace cache directory
       - SENTENCE_TRANSFORMERS_HOME=/root/.cache/huggingface/sentence-transformers  # Sentence transformers cache
+      - PIP_CACHE_DIR=/root/.cache/pip  # Pip cache directory for wheel downloads
+      - TORCH_HOME=/root/.cache/torch  # PyTorch cache directory
     env_file:
       - .env
     ports:
@@ -61,6 +62,7 @@ services:
       - ./secrets:/secrets:ro
       - ./app:/app/app
       - model_cache:/root/.cache  # Cache all models (huggingface, torch, etc)
+      - pip_cache:/root/.cache/pip  # Persist pip cache for faster builds
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     deploy:
       resources:
@@ -90,12 +92,15 @@ services:
       # - GOOGLE_APPLICATION_CREDENTIALS=/secrets/sa.json
       # - HF_HOME=/root/.cache/huggingface  # HuggingFace cache directory
       # - SENTENCE_TRANSFORMERS_HOME=/root/.cache/huggingface/sentence-transformers  # Sentence transformers cache
+      # - PIP_CACHE_DIR=/root/.cache/pip  # Pip cache directory for wheel downloads
+      # - TORCH_HOME=/root/.cache/torch  # PyTorch cache directory
   #   env_file:
   #     - .env
   #   volumes:
   #     - ./secrets:/secrets:ro
   #     - ./app:/app/app
   #     - model_cache:/root/.cache  # Cache all models (huggingface, torch, etc)
+  #     - pip_cache:/root/.cache/pip  # Persist pip cache for faster builds
   #   command: celery -A app.tasks.celery_app worker --loglevel=info
   #   deploy:
   #     resources:
@@ -108,3 +113,4 @@ volumes:
   postgres_data:
   redis_data:
   model_cache:  # Persistent storage for downloaded ML models
+  pip_cache:  # Persistent pip cache for faster Docker builds

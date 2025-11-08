@@ -1,93 +1,60 @@
-"""PDF parsing using pypdf with pymupdf fallback."""
+"""PDF parsing using LangChain PDF loaders."""
 import io
 import logging
 from typing import Optional
-from pypdf import PdfReader
+from langchain_community.document_loaders import PyPDFLoader, PDFMinerLoader
+from langchain_core.documents import Document
 
 logger = logging.getLogger(__name__)
 
 
-def parse_pdf(content: bytes) -> str:
+def parse_pdf(content: bytes, filename: str = "temp.pdf") -> str:
     """
-    Extract text from PDF content.
+    Extract text from PDF content using LangChain loaders.
     
     Args:
         content: PDF file content as bytes
+        filename: Optional filename for better error messages
         
     Returns:
         Extracted text as string
     """
     try:
-        # Try pypdf first
-        pdf_file = io.BytesIO(content)
-        reader = PdfReader(pdf_file)
+        # Save content to temporary file-like object
+        import tempfile
+        import os
         
-        text_parts = []
-        for page_num, page in enumerate(reader.pages):
-            try:
-                text = page.extract_text()
-                if text and text.strip():
-                    text_parts.append(text)
-            except Exception as e:
-                logger.warning(f"Error extracting text from page {page_num}: {e}")
-                continue
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+            tmp_file.write(content)
+            tmp_path = tmp_file.name
         
-        full_text = "\n\n".join(text_parts)
-        
-        # If pypdf returns empty text, try pymupdf
-        if not full_text.strip():
-            logger.info("pypdf returned empty text, trying pymupdf fallback")
-            full_text = parse_pdf_with_pymupdf(content)
-        
-        return full_text
-        
-    except Exception as e:
-        logger.error(f"Error parsing PDF with pypdf: {e}")
-        # Try fallback
         try:
-            return parse_pdf_with_pymupdf(content)
-        except Exception as fallback_error:
-            logger.error(f"Fallback pymupdf also failed: {fallback_error}")
-            raise
-
-
-def parse_pdf_with_pymupdf(content: bytes) -> str:
-    """
-    Fallback PDF parser using pymupdf (fitz).
-    
-    Args:
-        content: PDF file content as bytes
+            # Try PyPDFLoader first (uses pypdf)
+            loader = PyPDFLoader(tmp_path)
+            documents = loader.load()
+            
+            if not documents or not any(doc.page_content.strip() for doc in documents):
+                # If PyPDF returns empty, try PDFMiner
+                logger.info("PyPDF returned empty text, trying PDFMiner fallback")
+                loader = PDFMinerLoader(tmp_path)
+                documents = loader.load()
+            
+            # Combine all pages
+            full_text = "\n\n".join(doc.page_content for doc in documents if doc.page_content.strip())
+            return full_text
+            
+        finally:
+            # Clean up temp file
+            os.unlink(tmp_path)
         
-    Returns:
-        Extracted text as string
-    """
-    try:
-        import fitz  # PyMuPDF
-        
-        pdf_file = io.BytesIO(content)
-        doc = fitz.open(stream=pdf_file, filetype="pdf")
-        
-        text_parts = []
-        for page_num in range(len(doc)):
-            page = doc.load_page(page_num)
-            text = page.get_text()
-            if text and text.strip():
-                text_parts.append(text)
-        
-        doc.close()
-        return "\n\n".join(text_parts)
-        
-    except ImportError:
-        logger.error("pymupdf not installed, cannot use fallback parser")
-        return ""
     except Exception as e:
-        logger.error(f"Error parsing PDF with pymupdf: {e}")
-        return ""
+        logger.error(f"Error parsing PDF with LangChain: {e}")
+        raise
 
 
 def extract_pdf_metadata(content: bytes) -> dict:
     """
-    Extract metadata from PDF.
+    Extract metadata from PDF using LangChain.
     
     Args:
         content: PDF file content as bytes
@@ -96,6 +63,11 @@ def extract_pdf_metadata(content: bytes) -> dict:
         Dictionary with metadata
     """
     try:
+        import tempfile
+        import os
+        from pypdf import PdfReader
+        
+        # Still use pypdf directly for metadata extraction
         pdf_file = io.BytesIO(content)
         reader = PdfReader(pdf_file)
         

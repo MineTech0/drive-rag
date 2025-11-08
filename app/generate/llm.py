@@ -1,7 +1,10 @@
-"""LLM generation service with Ollama integration."""
+"""LLM generation service using LangChain."""
 import logging
-import requests
-from typing import List, Dict
+from typing import List, Dict, Optional
+from langchain_community.llms import Ollama
+from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -35,46 +38,81 @@ Vastaus:"""
 
 
 class LLMService:
-    """Service for LLM generation using Ollama (local open-source models)."""
+    """Service for LLM generation using LangChain."""
     
     def __init__(self):
-        self.base_url = settings.ollama_base_url
-        self.model = settings.ollama_model
-        logger.info(f"Initialized Ollama with model: {self.model} at {self.base_url}")
+        self.provider = settings.llm_provider.lower()
+        
+        if self.provider == "openai":
+            self._init_openai()
+        elif self.provider == "gemini":
+            self._init_gemini()
+        else:
+            self._init_ollama()
     
-    def generate(self, prompt: str, max_tokens: int = 1000) -> str:
+    def _init_ollama(self):
+        """Initialize Ollama provider using LangChain."""
+        self.model = settings.ollama_model
+        self.llm = Ollama(
+            model=self.model,
+            base_url=settings.ollama_base_url,
+            temperature=0.3,
+        )
+        logger.info(f"Initialized LangChain Ollama with model: {self.model} at {settings.ollama_base_url}")
+    
+    def _init_openai(self):
+        """Initialize OpenAI-compatible provider using LangChain."""
+        self.model = settings.openai_model
+        self.llm = ChatOpenAI(
+            model=self.model,
+            openai_api_key=settings.openai_api_key,
+            openai_api_base=settings.openai_api_base,
+            temperature=0.3,
+        )
+        logger.info(f"Initialized LangChain ChatOpenAI with model: {self.model} at {settings.openai_api_base}")
+    
+    def _init_gemini(self):
+        """Initialize Google Gemini provider using LangChain."""
+        self.model = settings.gemini_model
+        self.llm = ChatGoogleGenerativeAI(
+            model=self.model,
+            google_api_key=settings.gemini_api_key,
+            temperature=0.3,
+        )
+        logger.info(f"Initialized LangChain ChatGoogleGenerativeAI with model: {self.model}")
+    
+    def generate(self, prompt: str, max_tokens: int = 1000, system_message: Optional[str] = None) -> str:
         """
-        Generate text using Ollama.
+        Generate text using the configured LLM provider via LangChain.
         
         Args:
             prompt: The prompt to generate from
             max_tokens: Maximum tokens to generate
+            system_message: Optional system message
             
         Returns:
             Generated text
         """
         try:
-            response = requests.post(
-                f"{self.base_url}/api/generate",
-                json={
-                    "model": self.model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.3,
-                        "num_predict": max_tokens
-                    }
-                },
-                timeout=120
-            )
-            
-            response.raise_for_status()
-            result = response.json()
-            return result.get("response", "").strip()
-            
+            if system_message and self.provider in ["openai", "gemini"]:
+                # Use ChatPromptTemplate for chat models
+                chat_prompt = ChatPromptTemplate.from_messages([
+                    SystemMessagePromptTemplate.from_template(system_message),
+                    HumanMessagePromptTemplate.from_template("{prompt}")
+                ])
+                formatted_prompt = chat_prompt.format_messages(prompt=prompt)
+                response = self.llm.invoke(formatted_prompt)
+                # Extract content from AIMessage
+                return response.content.strip() if hasattr(response, 'content') else str(response).strip()
+            else:
+                # Simple invoke for Ollama or when no system message
+                full_prompt = f"{system_message}\n\n{prompt}" if system_message else prompt
+                response = self.llm.invoke(full_prompt)
+                return response.strip() if isinstance(response, str) else response.content.strip()
+                
         except Exception as e:
-            logger.error(f"Error generating with Ollama: {e}")
-            return "Virhe vastauksen generoinnissa. Varmista että Ollama on käynnissä."
+            logger.error(f"Error generating with LangChain {self.provider}: {e}")
+            return f"Virhe vastauksen generoinnissa: {str(e)}"
     
     def generate_answer(
         self,
@@ -94,12 +132,16 @@ class LLMService:
         # Format context
         context_text = self._format_context(context_chunks)
         
-        # Create prompt
-        prompt = SYSTEM_PROMPT.format(context=context_text)
-        prompt += f"\n\nKYSYMYS: {query}\n\nVASTAUS:"
-        
-        # Generate response
-        answer_text = self.generate(prompt)
+        # For OpenAI-style APIs and Gemini, use system message properly
+        if self.provider in ["openai", "gemini"]:
+            system_message = SYSTEM_PROMPT.format(context=context_text)
+            user_prompt = f"KYSYMYS: {query}\n\nVASTAUS:"
+            answer_text = self.generate(user_prompt, system_message=system_message)
+        else:
+            # For Ollama, combine everything into one prompt
+            prompt = SYSTEM_PROMPT.format(context=context_text)
+            prompt += f"\n\nKYSYMYS: {query}\n\nVASTAUS:"
+            answer_text = self.generate(prompt)
         
         # Extract sources
         sources = self._extract_sources(context_chunks)

@@ -16,9 +16,21 @@ class Settings(BaseSettings):
     embedding_model: str = "intfloat/multilingual-e5-large"
     embedding_dimension: int = 1024
     
-    # LLM (Ollama for local open-source models)
+    # LLM Configuration
+    llm_provider: str = "ollama"  # "ollama", "openai", or "gemini"
+    
+    # Ollama settings (for local open-source models)
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "mistral"  # or llama3.1, phi3, etc.
+    
+    # OpenAI-compatible API settings (for LM Studio, OpenAI, etc.)
+    openai_api_base: str = "http://localhost:1234/v1"  # LM Studio default
+    openai_api_key: str = "lm-studio"  # LM Studio doesn't require real key
+    openai_model: str = "local-model"  # Model name in LM Studio
+    
+    # Gemini API settings
+    gemini_api_key: str = ""  # Get from https://aistudio.google.com/app/apikey
+    gemini_model: str = "gemini-1.5-flash"  # or gemini-1.5-pro, gemini-1.0-pro
     
     # Reranker (BGE only)
     reranker_model: str = "BAAI/bge-reranker-v2-m3"

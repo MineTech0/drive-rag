@@ -17,10 +17,11 @@ This system is built entirely with open source components, requiring no propriet
 **Rationale**: Eliminates ongoing costs, ensures data privacy (no external API calls), provides full control over model behavior, and enables offline operation. Makes the system truly free to run and fully transparent.
 
 **Implementation**:
-- **Embeddings**: sentence-transformers (multilingual-e5-large) - local execution, 1024-dim vectors
+- **Embeddings**: HuggingFace embeddings via LangChain (multilingual-e5-large) - local execution, 1024-dim vectors
 - **Reranking**: BGE cross-encoder (BAAI/bge-reranker-v2-m3) - local execution, multilingual
-- **LLM**: Ollama with Mistral/Llama - local execution, no API calls
+- **LLM**: Ollama, LM Studio, or Gemini via LangChain providers - flexible provider support
 - **Database**: PostgreSQL with pgvector extension
+- **Framework**: LangChain for embeddings, text splitting, LLM providers, and document loaders
 - **Ingestion only**: Google Drive API (for document access, not ML)
 
 **Trade-offs**: Higher computational requirements (requires GPU for good performance) in exchange for zero ongoing costs, complete data privacy, and no rate limits.
@@ -108,16 +109,16 @@ User Query → Query Expander → Hybrid Retriever → Cross-Encoder Reranker �
 
 ### Embedding Strategy
 
-**Decision**: Use sentence-transformers with multilingual-e5-large model (1024-dimensional embeddings)
+**Decision**: Use LangChain's HuggingFaceEmbeddings wrapper with multilingual-e5-large model (1024-dimensional embeddings)
 
-**Rationale**: Excellent multilingual support (including Finnish), open source, runs locally on CPU or GPU, no API costs. The 1024-dim vectors capture nuanced semantic relationships while remaining computationally tractable.
+**Rationale**: Excellent multilingual support (including Finnish), open source, runs locally on CPU or GPU, no API costs. The 1024-dim vectors capture nuanced semantic relationships while remaining computationally tractable. LangChain provides standardized interface and ecosystem integration.
 
 **Alternatives considered**:
 - all-MiniLM-L6-v2: Faster but English-focused, 384-dim
 - BGE-large-en: English-only but excellent quality
 - OpenAI/Vertex AI: Ruled out to maintain fully open source architecture
 
-**Why multilingual-e5-large**: Best balance of quality, multilingual support, and local execution. Supports Finnish and 100+ languages.
+**Why multilingual-e5-large with LangChain**: Best balance of quality, multilingual support, local execution, and ecosystem compatibility. Supports Finnish and 100+ languages.
 
 ## API Design
 
@@ -208,9 +209,10 @@ The system uses Ragas for automated quality evaluation across four dimensions:
 - Full-text search (tsvector) enables hybrid retrieval in single database
 
 ### LangChain
-- Abstracts common RAG patterns (document loading, text splitting)
-- Extensible for different LLM providers
-- Active development and community support
+- Unified interface for embeddings, LLMs, and document loaders
+- Standardized prompt templating and message formatting
+- Rich ecosystem of integrations and tools
+- Simplifies provider switching (Ollama, OpenAI, Gemini)
 
 ### Celery + Redis
 - Proven distributed task queue

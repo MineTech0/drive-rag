@@ -10,20 +10,22 @@ google-auth
 google-auth-oauthlib
 google-auth-httplib2
 
-# LangChain Core
+# LangChain Core (includes transitives: sentence-transformers, torch, openai, google-generativeai)
 langchain
+langchain-core
 langchain-community
+langchain-huggingface
+langchain-google-genai
+langchain-openai
+langchain-text-splitters
 
 # Database
 psycopg[binary]
-psycopg2-binary
 pgvector
-sqlalchemy
-alembic
+sentence_transformers
 
-# PDF Processing
+# PDF Processing (used by LangChain loaders)
 pypdf
-pymupdf
 
 # Text Processing
 tiktoken
@@ -32,20 +34,13 @@ tiktoken
 celery
 redis
 
-# Evaluation
+# Evaluation (includes datasets as transitive dependency)
 ragas
-datasets
-
-# Open Source ML Models
-sentence-transformers
-torch
 
 # Utilities
 python-dotenv
 pyyaml
 requests
-tenacity
-rich
 
 # Development
 pytest

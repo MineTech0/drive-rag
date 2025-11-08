@@ -23,7 +23,7 @@ def ask_question(
     multi_query: bool = True,
     hyde: bool = False,
     top_k: int = None,  # None = auto-detect
-    timeout: int = 200
+    timeout: int = 2000
 ):
     """Ask a question to the RAG system."""
     
@@ -164,6 +164,99 @@ def search_documents(
         return None
 
 
+def iterative_rag(
+    query: str,
+    api_url: str = "http://localhost:8000",
+    timeout: int = 120  # 2 minutes for iterative process
+):
+    """Perform iterative agentic RAG search."""
+    
+    endpoint = f"{api_url}/ask-iterative"
+    
+    payload = {
+        "query": query,
+        "multi_query": True
+    }
+    
+    console.print(f"\n[bold cyan]🤖 Iteratiivinen Agentti:[/bold cyan] {query}")
+    console.print(f"[dim]API: {endpoint}[/dim]\n")
+    
+    try:
+        with console.status("[bold cyan]Agentti tutkii iteratiivisesti (voi kestää 30-120s)...", spinner="dots"):
+            response = requests.post(
+                endpoint,
+                json=payload,
+                timeout=timeout
+            )
+        
+        response.raise_for_status()
+        result = response.json()
+        
+        # Display iteration history
+        console.print(Panel(
+            f"[bold]Iteraatiot: {result['total_iterations']} | "
+            f"Lähteet: {result['total_sources']} | "
+            f"Luottamus: {result['final_confidence']:.0%}[/bold]",
+            border_style="cyan"
+        ))
+        
+        for iteration in result['iterations']:
+            status = "✓" if iteration['confidence'] >= 0.85 else "↻"
+            console.print(f"\n[bold yellow]{status} Kierros {iteration['iteration']}:[/bold yellow]")
+            console.print(f"  Kysymys: {iteration['query']}")
+            console.print(f"  Tulokset: {iteration['num_results']} lähdettä")
+            console.print(f"  Luottamus: {iteration['confidence']:.0%}")
+            console.print(f"  Arvio: {iteration['assessment']}")
+            if iteration['missing_info']:
+                console.print(f"  [dim]Puuttuu: {', '.join(iteration['missing_info'][:3])}[/dim]")
+        
+        # Display final answer
+        console.print("\n")
+        console.print(Panel(
+            Markdown(result['answer']),
+            title="[bold green]💡 Kattava Vastaus[/bold green]",
+            border_style="green",
+            box=box.ROUNDED
+        ))
+        
+        # Display sources
+        if result.get('sources'):
+            console.print("\n[bold cyan]📚 Kaikki Lähteet:[/bold cyan]\n")
+            
+            sources_table = Table(box=box.SIMPLE)
+            sources_table.add_column("#", style="dim", width=3)
+            sources_table.add_column("Tiedosto", style="cyan")
+            sources_table.add_column("Sijainti", style="yellow")
+            sources_table.add_column("Katkelma", style="dim")
+            
+            for i, source in enumerate(result['sources'][:20], 1):  # Show first 20
+                sources_table.add_row(
+                    str(i),
+                    source['file_name'][:40],
+                    source.get('locator', 'N/A')[:20],
+                    source.get('snippet', '')[:50] + "..."
+                )
+            
+            console.print(sources_table)
+            
+            if len(result['sources']) > 20:
+                console.print(f"\n[dim]... ja {len(result['sources']) - 20} muuta lähdettä[/dim]")
+        
+        console.print(f"\n[dim]⏱️  Kokonaisaika: {result.get('latency_ms', 0)/1000:.1f}s[/dim]")
+        
+        return result
+        
+    except requests.exceptions.Timeout:
+        console.print("[red]❌ Aikakatkaistu! Iteratiivinen prosessi kestää liian kauan.[/red]")
+        return None
+    except requests.exceptions.ConnectionError:
+        console.print(f"[red]❌ Ei yhteyttä API:in osoitteessa {api_url}[/red]")
+        return None
+    except Exception as e:
+        console.print(f"[red]❌ Virhe: {e}[/red]")
+        return None
+
+
 def deep_research(
     query: str,
     api_url: str = "http://localhost:8000",
@@ -281,6 +374,7 @@ def interactive_mode(api_url: str = "http://localhost:8000"):
         "[bold cyan]🤖 RAG Testi - Interaktiivinen tila[/bold cyan]\n\n"
         "Kirjoita kysymyksiä ja paina Enter.\n"
         "Komennot:\n"
+        "  /iterative <kysymys> - Iteratiivinen agentti (hakee kunnes tyytyväinen)\n"
         "  /search <kysymys> - Hae dokumentteja ilman vastausta\n"
         "  /research <aihe> - Syvätutkimus aiheesta (iteratiivinen analyysi)\n"
         "  /multi - Vaihda multi-query päälle/pois\n"
@@ -349,6 +443,13 @@ def interactive_mode(api_url: str = "http://localhost:8000"):
                         console.print("[yellow]Anna hakukysely: /search <kysymys>[/yellow]")
                     continue
                 
+                elif cmd == '/iterative':
+                    if len(cmd_parts) > 1:
+                        iterative_rag(cmd_parts[1], api_url)
+                    else:
+                        console.print("[yellow]Anna kysymys: /iterative <kysymys>[/yellow]")
+                    continue
+                
                 elif cmd == '/research':
                     if len(cmd_parts) > 1:
                         deep_research(cmd_parts[1], api_url)
@@ -383,6 +484,9 @@ Esimerkkejä:
   # Yksittäinen kysymys
   python scripts/test_ask.py -q "Mikä on HOT:n puheenjohtaja?"
 
+  # Iteratiivinen agentti (hakee kunnes tyytyväinen)
+  python scripts/test_ask.py --iterative "etsi kaikki tanssikerhon puheenjohtajat"
+
   # Syvätutkimus (iteratiivinen analyysi)
   python scripts/test_ask.py --research "HOT:n hallinto ja organisaatio"
 
@@ -404,6 +508,12 @@ Esimerkkejä:
         '-q', '--query',
         type=str,
         help='Kysymys (jos ei annettu, käynnistyy interaktiivinen tila)'
+    )
+    
+    parser.add_argument(
+        '--iterative',
+        type=str,
+        help='Iteratiivinen agentti (hakee kunnes tyytyväinen, max 5 kierrosta)'
     )
     
     parser.add_argument(
@@ -476,6 +586,18 @@ Esimerkkejä:
     # Health check mode
     if args.health:
         check_health(args.api_url)
+        return
+    
+    # Iterative agentic RAG mode
+    if args.iterative:
+        result = iterative_rag(
+            args.iterative,
+            api_url=args.api_url,
+            timeout=args.timeout * 2  # Double timeout for iterative
+        )
+        
+        if args.json and result:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
         return
     
     # Deep research mode
